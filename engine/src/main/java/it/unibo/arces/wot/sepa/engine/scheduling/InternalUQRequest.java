@@ -117,7 +117,7 @@ public abstract class InternalUQRequest extends InternalRequest {
 	https://www.w3.org/TR/xmlschema11-2/#dateTimeStamp
 
 	3.4.28 dateTimeStamp
-		[Definition:]   The dateTimeStamp datatype is ·derived· from dateTime by giving the value required to its explicitTimezone facet. 
+		[Definition:]   The dateTimeStamp datatype isoc ·derived· from dateTime by giving the value required to its explicitTimezone facet. 
 		The result is that all values of dateTimeStamp are required to have explicit time zone offsets and the datatype is totally ordered.
 
 	 * */

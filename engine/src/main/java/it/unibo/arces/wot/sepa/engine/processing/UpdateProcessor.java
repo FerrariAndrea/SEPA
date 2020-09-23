@@ -1,7 +1,8 @@
-/* This class implements the processing of a SPARQL 1.1 UPDATE
- * 
- * Author: Luca Roffia (luca.roffia@unibo.it)
-
+/** This class implements the processing of a SPARQL 1.1 UPDATE
+* @author Luca Roffia (luca.roffia@unibo.it)
+* @version 0.9.12
+*/
+/*
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
@@ -22,23 +23,63 @@ import org.apache.jena.query.QueryException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import it.unibo.arces.wot.sepa.commons.exceptions.SEPABindingsException;
 import it.unibo.arces.wot.sepa.commons.exceptions.SEPAProtocolException;
 import it.unibo.arces.wot.sepa.commons.exceptions.SEPASecurityException;
 import it.unibo.arces.wot.sepa.commons.protocol.SPARQL11Properties;
 import it.unibo.arces.wot.sepa.commons.protocol.SPARQL11Protocol;
+import it.unibo.arces.wot.sepa.commons.protocol.SPARQL11Properties.HTTPMethod;
 import it.unibo.arces.wot.sepa.commons.request.UpdateRequest;
 import it.unibo.arces.wot.sepa.commons.response.Response;
 import it.unibo.arces.wot.sepa.engine.bean.SEPABeans;
 import it.unibo.arces.wot.sepa.engine.bean.UpdateProcessorBeans;
+import it.unibo.arces.wot.sepa.engine.processing.tuning.SPARQLAnalyzer;
+import it.unibo.arces.wot.sepa.engine.processing.tuning.UpdateConstruct;
+import it.unibo.arces.wot.sepa.engine.processing.tuning.UpdateResponseWithAR;
 import it.unibo.arces.wot.sepa.engine.scheduling.InternalPreProcessedUpdateRequest;
+import it.unibo.arces.wot.sepa.engine.scheduling.InternalQueryRequest;
 import it.unibo.arces.wot.sepa.engine.scheduling.InternalUpdateRequest;
 import it.unibo.arces.wot.sepa.timing.Timings;
 
-class UpdateProcessor implements UpdateProcessorMBean {
+
+
+
+import com.google.gson.JsonObject;
+import it.unibo.arces.wot.sepa.commons.request.QueryRequest;
+import it.unibo.arces.wot.sepa.commons.response.QueryResponse;
+import it.unibo.arces.wot.sepa.commons.response.UpdateResponse;
+import it.unibo.arces.wot.sepa.commons.security.ClientAuthorization;
+import it.unibo.arces.wot.sepa.commons.sparql.Bindings;
+import it.unibo.arces.wot.sepa.commons.sparql.BindingsResults;
+import org.apache.jena.graph.*;
+import org.apache.jena.query.Query;
+import org.apache.jena.reasoner.rulesys.impl.BindingStack;
+import org.apache.jena.sparql.core.Quad;
+import org.apache.jena.sparql.modify.request.QuadAcc;
+import org.apache.jena.sparql.syntax.ElementTriplesBlock;
+import org.apache.jena.update.Update;
+import org.apache.jena.update.UpdateFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import it.unibo.arces.wot.sepa.commons.exceptions.SEPAProtocolException;
+import it.unibo.arces.wot.sepa.commons.protocol.SPARQL11Properties;
+import it.unibo.arces.wot.sepa.commons.protocol.SPARQL11Protocol;
+import it.unibo.arces.wot.sepa.commons.request.UpdateRequest;
+import it.unibo.arces.wot.sepa.commons.response.ErrorResponse;
+import it.unibo.arces.wot.sepa.commons.response.Response;
+import it.unibo.arces.wot.sepa.engine.bean.ProcessorBeans;
+import it.unibo.arces.wot.sepa.timing.Timings;
+
+import java.lang.reflect.Array;
+import java.util.Set;
+import java.util.concurrent.Semaphore;
+
+public class UpdateProcessor implements UpdateProcessorMBean {
 	protected static final Logger logger = LogManager.getLogger();
 
-	private final SPARQL11Protocol endpoint;
-	private final SPARQL11Properties properties;
+	protected final SPARQL11Protocol endpoint;
+	protected final SPARQL11Properties properties;
 
 	public UpdateProcessor(SPARQL11Properties properties) throws SEPAProtocolException {
 		this.endpoint = new SPARQL11Protocol();
@@ -47,12 +88,12 @@ class UpdateProcessor implements UpdateProcessorMBean {
 		SEPABeans.registerMBean("SEPA:type=" + this.getClass().getSimpleName(), this);
 	}
 
-	public synchronized InternalPreProcessedUpdateRequest preProcess(InternalUpdateRequest update)
+	public InternalPreProcessedUpdateRequest preProcess(InternalUpdateRequest update)
 			throws QueryException {
 		return new InternalPreProcessedUpdateRequest(update);
 	}
 
-	public synchronized Response process(InternalUpdateRequest req) throws SEPASecurityException {
+	public Response process(InternalUpdateRequest req) throws SEPASecurityException {
 		// ENDPOINT UPDATE
 		UpdateRequest request = new UpdateRequest(properties.getUpdateMethod(), properties.getProtocolScheme(),
 				properties.getHost(), properties.getPort(), properties.getUpdatePath(), req.getSparql(),
@@ -172,4 +213,5 @@ class UpdateProcessor implements UpdateProcessorMBean {
 	public long getAbortedRequests() {
 		return UpdateProcessorBeans.getAbortedRequests();
 	}
+	
 }

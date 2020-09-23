@@ -1,6 +1,8 @@
 package it.unibo.arces.wot.sepa;
 
+import it.unibo.arces.wot.sepa.api.protocols.websocket.WebsocketSubscriptionProtocol;
 import it.unibo.arces.wot.sepa.commons.exceptions.SEPAPropertiesException;
+import it.unibo.arces.wot.sepa.commons.exceptions.SEPAProtocolException;
 import it.unibo.arces.wot.sepa.commons.exceptions.SEPASecurityException;
 import it.unibo.arces.wot.sepa.commons.request.QueryRequest;
 import it.unibo.arces.wot.sepa.commons.request.SubscribeRequest;
@@ -25,13 +27,7 @@ public class ConfigurationProvider {
 	private final long TIMEOUT = 5000;
 	private final long NRETRY = 0;
 	
-	public long getTimeout() {
-		return TIMEOUT;
-	}
-	
-	public long getNRetry() {
-		return NRETRY;
-	}
+	ClientSecurityManager sm = null;
 	
 	public ConfigurationProvider() throws SEPAPropertiesException, SEPASecurityException {
 		String jsapFileName = "sepatest.jsap";
@@ -42,6 +38,7 @@ public class ConfigurationProvider {
 		} else if (System.getProperty("secure") != null) {
 			jsapFileName = "sepatest-secure.jsap";
 			logger.info("JSAP secure default: " + jsapFileName);
+			
 		}
 
 		jsapPath = getClass().getClassLoader().getResource(jsapFileName).getPath();
@@ -56,6 +53,12 @@ public class ConfigurationProvider {
 		appProfile = new JSAP(jsapPath);
 		
 		prefixes = appProfile.getPrefixes();
+		
+		if (appProfile.isSecure()) sm = buildSecurityManager();
+	}
+	
+	public WebsocketSubscriptionProtocol getWebsocketClient() throws SEPASecurityException, SEPAProtocolException {
+		return new WebsocketSubscriptionProtocol(appProfile.getHost(), appProfile.getSubscribePort(), appProfile.getSubscribePath(), null, sm);
 	}
 
 	private String getSPARQLUpdate(String id) {
@@ -66,7 +69,7 @@ public class ConfigurationProvider {
 		return prefixes + " " +appProfile.getSPARQLQuery(id);
 	}
 	
-	public UpdateRequest buildUpdateRequest(String id, ClientSecurityManager sm,long timeout,long nRetry) {
+	public UpdateRequest buildUpdateRequest(String id) { //, ClientSecurityManager sm,long timeout,long nRetry) {
 		String authorization = null;
 
 		if (sm != null)
@@ -83,10 +86,10 @@ public class ConfigurationProvider {
 		return new UpdateRequest(appProfile.getUpdateMethod(id), appProfile.getUpdateProtocolScheme(id),
 				appProfile.getUpdateHost(id), appProfile.getUpdatePort(id), appProfile.getUpdatePath(id),
 				getSPARQLUpdate(id), appProfile.getUsingGraphURI(id), appProfile.getUsingNamedGraphURI(id),
-				authorization, timeout,nRetry);
+				authorization, TIMEOUT,NRETRY);
 	}
 
-	public QueryRequest buildQueryRequest(String id, ClientSecurityManager sm,long timeout,long nRetry) {
+	public QueryRequest buildQueryRequest(String id) {//, ClientSecurityManager sm,long timeout,long nRetry) {
 		String authorization = null;
 
 		if (sm != null)
@@ -103,17 +106,17 @@ public class ConfigurationProvider {
 		return new QueryRequest(appProfile.getQueryMethod(id), appProfile.getQueryProtocolScheme(id),
 				appProfile.getQueryHost(id), appProfile.getQueryPort(id), appProfile.getQueryPath(id),
 				getSPARQLQuery(id), appProfile.getDefaultGraphURI(id), appProfile.getNamedGraphURI(id),
-				authorization, timeout,nRetry);
+				authorization, TIMEOUT,NRETRY);
 	}
 
-	public QueryRequest buildQueryRequest(String id, String authToken,long timeout,long nRetry) {
+	public QueryRequest buildQueryRequest(String id, String authToken) {
 		return new QueryRequest(appProfile.getQueryMethod(id), appProfile.getQueryProtocolScheme(id),
 				appProfile.getQueryHost(id), appProfile.getQueryPort(id), appProfile.getQueryPath(id),
 				getSPARQLQuery(id), appProfile.getDefaultGraphURI(id), appProfile.getNamedGraphURI(id),
-				authToken, timeout,nRetry);
+				authToken, TIMEOUT,NRETRY);
 	}
 
-	public SubscribeRequest buildSubscribeRequest(String id, ClientSecurityManager sm,long timeout, long nRetry) {
+	public SubscribeRequest buildSubscribeRequest(String id) { //), ClientSecurityManager sm) {
 		String authorization = null;		
 		if (sm != null)
 			try {
@@ -127,10 +130,10 @@ public class ConfigurationProvider {
 			}
 		
 		return new SubscribeRequest(getSPARQLQuery(id), id, appProfile.getDefaultGraphURI(id),
-				appProfile.getNamedGraphURI(id), authorization, timeout,nRetry);
+				appProfile.getNamedGraphURI(id), authorization);
 	}
 
-	public UnsubscribeRequest buildUnsubscribeRequest(String spuid, ClientSecurityManager sm, long timeout, long nRetry) {
+	public UnsubscribeRequest buildUnsubscribeRequest(String spuid) { //, ClientSecurityManager sm) {
 		String authorization = null;		
 		if (sm != null)
 			try {
@@ -143,10 +146,14 @@ public class ConfigurationProvider {
 				logger.error(e.getMessage());
 			}
 		
-		return new UnsubscribeRequest(spuid, authorization, timeout,nRetry);
+		return new UnsubscribeRequest(spuid, authorization);
 	}
 
-	public ClientSecurityManager buildSecurityManager() throws SEPASecurityException, SEPAPropertiesException {
+	public ClientSecurityManager getSecurityManager() {
+		return sm;
+	}
+	
+	private ClientSecurityManager buildSecurityManager() throws SEPASecurityException, SEPAPropertiesException {
 		AuthenticationProperties auth = new AuthenticationProperties(jsapPath);
 		
 		ClientSecurityManager security;

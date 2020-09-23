@@ -9,7 +9,6 @@ import it.unibo.arces.wot.sepa.commons.exceptions.SEPASecurityException;
 import it.unibo.arces.wot.sepa.commons.protocol.SPARQL11Protocol;
 import it.unibo.arces.wot.sepa.commons.response.ErrorResponse;
 import it.unibo.arces.wot.sepa.commons.response.Response;
-import it.unibo.arces.wot.sepa.commons.security.ClientSecurityManager;
 import it.unibo.arces.wot.sepa.pattern.JSAP;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -30,12 +29,8 @@ public class StressUsingSPARQLProtocol {
 
     private static JSAP properties = null;
     private static ConfigurationProvider provider;
-
-    private static ClientSecurityManager sm;
     private final static String VALID_ID = "SEPATest";
-
-    private final static Sync sync = new Sync();
-
+    private static Sync sync; 
     private static SPARQL11Protocol client;
     private final ArrayList<Subscriber> subscribers = new ArrayList<Subscriber>();
     private final ArrayList<Publisher> publishers = new ArrayList<Publisher>();
@@ -44,12 +39,11 @@ public class StressUsingSPARQLProtocol {
     public static void init() throws Exception {
         provider = new ConfigurationProvider();
         properties = provider.getJsap();
-
+        sync = new Sync();
+        
         if (properties.isSecure()) {
-            sm = provider.buildSecurityManager();
-
             // Registration
-            Response response = sm.register(VALID_ID);
+            Response response = provider.getSecurityManager().register(VALID_ID);
             assertFalse(response.toString(), response.isError());
         }
     }
@@ -60,20 +54,17 @@ public class StressUsingSPARQLProtocol {
 
         sync.reset();
 
-        if (properties.isSecure())
-            client = new SPARQL11Protocol(sm);
-        else
-            client = new SPARQL11Protocol();
+        client = new SPARQL11Protocol(provider.getSecurityManager());
 
         subscribers.clear();
         publishers.clear();
 
-        Response ret = client.update(provider.buildUpdateRequest("DELETE_ALL", sm,provider.getTimeout(),provider.getNRetry()));
+        Response ret = client.update(provider.buildUpdateRequest("DELETE_ALL"));
 
         if (ret.isError()) {
             ErrorResponse error = (ErrorResponse) ret;
-            if (error.isTokenExpiredError() && properties.isSecure()) sm.refreshToken();
-            ret = client.update(provider.buildUpdateRequest("DELETE_ALL", sm,provider.getTimeout(),provider.getNRetry()));
+            if (error.isTokenExpiredError() && properties.isSecure()) provider.getSecurityManager().refreshToken();
+            ret = client.update(provider.buildUpdateRequest("DELETE_ALL"));
         }
 
         logger.debug(ret);
@@ -90,6 +81,8 @@ public class StressUsingSPARQLProtocol {
 
         for (Publisher pub : publishers)
             pub.close();
+        
+        sync.close();
     }
 
     @Test(timeout = 15000)
@@ -99,17 +92,10 @@ public class StressUsingSPARQLProtocol {
             for (int n = 0; n < 10; n++) {
                 new Thread(threadGroup,null,"TokenThread-"+n) {
                     public void run() {
-                        ClientSecurityManager sm = null;
-                        try {
-                            sm = provider.buildSecurityManager();
-                        } catch (SEPASecurityException | SEPAPropertiesException e1) {
-                            assertFalse(e1.getMessage(),true);
-                        }
-
                         // Registration
                         Response response = null;
                         try {
-                            response = sm.register(VALID_ID);
+                            response = provider.getSecurityManager().register(VALID_ID);
                             logger.debug(response);
                         } catch (SEPASecurityException | SEPAPropertiesException e1) {
                             assertFalse(e1.getMessage(),true);
@@ -119,9 +105,9 @@ public class StressUsingSPARQLProtocol {
                         for (int i = 0; i < 100; i++) {
                             String authorization = null;
                             try {
-                                authorization = sm.getAuthorizationHeader();
-                                if (authorization == null) sm.refreshToken();
-                                authorization = sm.getAuthorizationHeader();
+                                authorization = provider.getSecurityManager().getAuthorizationHeader();
+                                if (authorization == null) provider.getSecurityManager().refreshToken();
+                                authorization = provider.getSecurityManager().getAuthorizationHeader();
                             } catch (SEPASecurityException | SEPAPropertiesException e1) {
                                 assertFalse(e1.getMessage(),true);
                             }
@@ -164,7 +150,7 @@ public class StressUsingSPARQLProtocol {
                 sync.getEvents() != subscribers.size());
     }
 
-    @Test(timeout = 200000)
+    @Test (timeout = 5000)
     public void NotifyNxN() throws IOException, IllegalArgumentException, SEPAProtocolException, InterruptedException,
             SEPAPropertiesException, SEPASecurityException {
 
@@ -244,7 +230,7 @@ public class StressUsingSPARQLProtocol {
             pub.join();
     }
 
-    @Test (timeout = 200000)
+    @Test (timeout = 60000)
     public void Notify3Nx2N() throws IOException, IllegalArgumentException, SEPAProtocolException, InterruptedException,
             SEPAPropertiesException, SEPASecurityException {
         int n = 15;

@@ -1,0 +1,4 @@
+2020-07-17T17:04:01,741|[ERROR]|WebSocketSelector-52|(WebsocketServer.java:201)|@onError: null Exception: java.net.BindException: Address already in use: bind
+
+2020-07-17T17:04:01,741|[FATAL]|WebSocketSelector-52|(WebsocketServer.java:206)|Failed to start. Exit
+

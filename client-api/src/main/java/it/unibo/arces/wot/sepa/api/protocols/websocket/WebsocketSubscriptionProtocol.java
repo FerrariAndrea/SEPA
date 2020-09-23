@@ -42,10 +42,7 @@ public class WebsocketSubscriptionProtocol extends SubscriptionProtocol implemen
 	protected final Logger logger = LogManager.getLogger();
 
 	protected final URI url;
-
 	protected Request lastRequest = null;
-	private Object requestLock = new Object();
-
 	protected final WebsocketClientEndpoint client;
 
 	public WebsocketSubscriptionProtocol(String host, int port, String path, ISubscriptionHandler handler,
@@ -76,33 +73,37 @@ public class WebsocketSubscriptionProtocol extends SubscriptionProtocol implemen
 
 	@Override
 	public void subscribe(SubscribeRequest request) throws SEPAProtocolException {
-		logger.trace("@subscribe: " + request);
+		logger.trace("subscribe: " + request);
 
-		synchronized (requestLock) {
+		synchronized (client) {
 			if (lastRequest != null)
 				try {
-					requestLock.wait();
+					logger.trace("WAIT");
+					client.wait();
 				} catch (InterruptedException e) {
 					throw new SEPAProtocolException(e.getMessage());
 				}
 
 			lastRequest = request;
 
-			if (!client.isConnected())
+			if (!client.isConnected()) {
+				logger.trace("CONNECT");
 				client.connect(url);
+			}
 
+			logger.trace("SEND "+lastRequest.toString());
 			client.send(lastRequest.toString());
 		}
 	}
 
 	@Override
 	public void unsubscribe(UnsubscribeRequest request) throws SEPAProtocolException {
-		logger.debug("@unsubscribe: " + request);
+		logger.trace("unsubscribe: " + request);
 
-		synchronized (requestLock) {
+		synchronized (client) {
 			if (lastRequest != null)
 				try {
-					requestLock.wait();
+					client.wait();
 				} catch (InterruptedException e) {
 					throw new SEPAProtocolException(e.getMessage());
 				}
@@ -135,58 +136,62 @@ public class WebsocketSubscriptionProtocol extends SubscriptionProtocol implemen
 		// REFRESH TOKEN
 		if (sm != null && errorResponse.isTokenExpiredError()) {
 			try {
+				logger.trace("REFRESH TOKEN");
 				Response ret = sm.refreshToken();
 				sm.storeOAuthProperties();
-				logger.debug(ret);
+				logger.trace(ret);
 			} catch (SEPAPropertiesException | SEPASecurityException e) {
 				logger.error(e.getMessage());
 				if (logger.isTraceEnabled())
 					e.printStackTrace();
-				ErrorResponse err = new ErrorResponse(401, "invalid_grant", "Failed to refresh token. "+e.getMessage());
+				ErrorResponse err = new ErrorResponse(401, "invalid_grant",
+						"Failed to refresh token. " + e.getMessage());
 				handler.onError(err);
 				return;
 			}
-			
-			if (client.isConnected())
-				try {
-//					if (lastRequest.isSubscribeRequest()) {
-//						SubscribeRequest subReq= (SubscribeRequest) lastRequest;
-//						lastRequest = new SubscribeRequest(subReq.getSPARQL(),subReq.getAlias(), subReq.getDefaultGraphUri(),subReq.getNamedGraphUri(),
-//								sm.getAuthorizationHeader(),subReq.getTimeout(),subReq.getNRetry());
-//					}
-//					else {
-//						UnsubscribeRequest unsubReq= (UnsubscribeRequest) lastRequest;
-//						lastRequest = new UnsubscribeRequest(unsubReq.getSubscribeUUID(),sm.getAuthorizationHeader(),unsubReq.getTimeout());
-//					}
-					client.send(lastRequest.toString());
-				} catch (SEPAProtocolException  e) {
-					logger.error(e.getMessage());
-					if (logger.isTraceEnabled())
-						e.printStackTrace();
-					ErrorResponse err = new ErrorResponse(401, "invalid_grant", "Failed to send request after refreshing token. "+e.getMessage());
-					handler.onError(err);
-				}
-		}
-		else handler.onError(errorResponse);
 
+			// RETRY LAST REQUEST
+			synchronized (client) {
+				if (client.isConnected())
+					try {
+						if (lastRequest != null) {
+							lastRequest.setAuthorizationHeader(sm.getAuthorizationHeader());
+							logger.trace("SEND LAST REQUEST WITH NEW TOKEN");
+							client.send(lastRequest.toString());
+						}
+					} catch (SEPAProtocolException | SEPASecurityException | SEPAPropertiesException e) {
+						logger.error(e.getMessage());
+						if (logger.isTraceEnabled())
+							e.printStackTrace();
+						ErrorResponse err = new ErrorResponse(401, "invalid_grant",
+								"Failed to send request after refreshing token. " + e.getMessage());
+						handler.onError(err);
+					}
+			}
+		} else
+			handler.onError(errorResponse);
 	}
 
 	@Override
 	public void onSubscribe(String spuid, String alias) {
-		synchronized (requestLock) {
+		logger.trace("@onSubscribe "+spuid+" alias: "+alias);
+		handler.onSubscribe(spuid, alias);
+
+		synchronized (client) {
 			lastRequest = null;
-			requestLock.notify();
-			handler.onSubscribe(spuid, alias);
+			client.notify();
 		}
 
 	}
 
 	@Override
 	public void onUnsubscribe(String spuid) {
-		synchronized (requestLock) {
+		logger.trace("@onUnsubscribe "+spuid);
+		handler.onUnsubscribe(spuid);
+
+		synchronized (client) {
 			lastRequest = null;
-			requestLock.notify();
-			handler.onUnsubscribe(spuid);
+			client.notify();
 		}
 	}
 
