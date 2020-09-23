@@ -32,51 +32,12 @@ public class UpdateProcessorTuned extends UpdateProcessor  {
 		// TODO Auto-generated constructor stub
 	}
 	
-	private Response realProcess(InternalUpdateRequest req) throws SEPASecurityException {
-		// ENDPOINT UPDATE
-		UpdateRequest request = new UpdateRequest(properties.getUpdateMethod(), properties.getProtocolScheme(),
-				properties.getHost(), properties.getPort(), properties.getUpdatePath(), req.getSparql(),
-				req.getDefaultGraphUri(), req.getNamedGraphUri(), req.getBasicAuthorizationHeader(),
-				UpdateProcessorBeans.getTimeout(),0);
-		logger.trace(request);
-
-		Response ret;
-		int n = 0;
-		do {
-			long start = Timings.getTime();
-			ret = endpoint.update(request);
-			long stop = Timings.getTime();
-			
-			UpdateProcessorBeans.timings(start, stop);
-			
-			logger.trace("Response: " + ret.toString());
-			Timings.log("UPDATE_PROCESSING_TIME", start, stop);
-			
-			n++;
-			
-			if (ret.isTimeoutError()) {
-				UpdateProcessorBeans.timedOutRequest();
-				logger.error("*TIMEOUT* ("+n+"/"+UpdateProcessorBeans.getTimeoutNRetry()+") "+req);
-				try {
-					Thread.sleep(1000);
-				} catch (InterruptedException e) {
-					logger.warn("Failed to sleep...");
-				}
-			}
-		} while(ret.isTimeoutError() && n < UpdateProcessorBeans.getTimeoutNRetry());
-		
-		if (ret.isTimeoutError()) {
-			logger.error("*** REQUEST ABORTED *** "+request);
-			UpdateProcessorBeans.abortedRequest();
-		}
-		
-		return ret;
-	}
+	
 	@Override
 	public Response process(InternalUpdateRequest req) throws SEPASecurityException {
 		//------------------------ADDED REMOVED------------------PREPARE---------inizio
 		//controllare che il timeout sia quello giusto
-		long start = Timings.getTime();
+		long tunedStart = Timings.getTime();
 		BindingsResults added_removed[]=null;
 		try {
 			added_removed = PrepareAddedRemovedFilter((int)UpdateProcessorBeans.getTimeout() ,req);
@@ -84,14 +45,13 @@ public class UpdateProcessorTuned extends UpdateProcessor  {
 			//System.out.println("removed.size: "+added_removed[1].size());
 		} catch (SEPASecurityException | SEPABindingsException e2) {
 			// TODO Auto-generated catch block
-			System.out.print("!!!!!!!!!!!!!!!!!!!!!!!!!WIP PREPARE!!!!!!!!!!!!!!!!!!!!!!");
+			System.out.print("!!!!!!!!!!!!!!!!!!!!!!!!!WIP Errore PREPARE!!!!!!!!!!!!!!!!!!!!!!");
 			e2.printStackTrace();
 		}
 		//------------------------ADDED REMOVED------------------PREPARE---------fine
-		long end = Timings.getTime();
+		long tunedEnd = Timings.getTime();
 		
-		return new UpdateResponseTuningFile( realProcess(req).toString(),new TuningFile(start, end, added_removed[0].size(), added_removed[1].size()));
-		/*
+	
 		// ENDPOINT UPDATE
 		UpdateRequest request = new UpdateRequest(properties.getUpdateMethod(), properties.getProtocolScheme(),
 				properties.getHost(), properties.getPort(), properties.getUpdatePath(), req.getSparql(),
@@ -111,8 +71,11 @@ public class UpdateProcessorTuned extends UpdateProcessor  {
 			if(ret.isUpdateResponse() && added_removed != null) {
 				try {
 					//attenzioe non so se UpdateProcessorBeans.getTimeout() sia l'arg giusto
-					ret=ApplyAddedRemovedFilter(added_removed[0],added_removed[1],ret);					
-					//System.out.print("WIP (ADDED): " +((UpdateResponseWithAR)ret).getAdded().toJson().toString());
+					ret=ApplyAddedRemovedFilter(
+							added_removed[0],
+							added_removed[1],
+							new MetricsTuningFile(tunedEnd-tunedStart),
+							ret);					
 				} catch (SEPASecurityException | SEPABindingsException e1) {
 					System.out.print("!!!!!!!!!!!!!!!!!!!!!!!!!WIP Errore APPLY!!!!!!!!!!!!!!!!!!!!!!");
 					// TODO Auto-generated catch block
@@ -141,8 +104,9 @@ public class UpdateProcessorTuned extends UpdateProcessor  {
 			logger.error("*** REQUEST ABORTED *** "+request);
 			UpdateProcessorBeans.abortedRequest();
 		}
+		
+		
 		return ret;
-		*/
 		
 	}
 	
@@ -168,13 +132,6 @@ public class UpdateProcessorTuned extends UpdateProcessor  {
 	                properties.getDefaultQueryPath(),askq, timeout, null,
 	                null, null);
 	       */
-			
-			//probabilmente i 3 null sono da sostituire con:
-			 /*	
-			   		req.getDefaultGraphUri(),
-					req.getNamedGraphUri(),
-					req.getBasicAuthorizationHeader(),
-			  */
 			QueryRequest askquery = new QueryRequest(
 					properties.getQueryMethod(),
 					properties.getProtocolScheme(),
@@ -196,9 +153,7 @@ public class UpdateProcessorTuned extends UpdateProcessor  {
 		private Triple bindingToTriple(Bindings bindings) throws SEPABindingsException{
 			String subject = bindings.getValue("s");
 			String predicate = bindings.getValue("p");
-			String object = bindings.getValue("o");
-			//errore---> null, null, null
-			//System.out.println("subject: "+ subject+ ", predicate: " +predicate+ ", object: "+object);
+			String object = bindings.getValue("o");			
 			
 			Node s = bindings.isBNode("s") ? NodeFactory.createBlankNode(subject) : NodeFactory.createURI(subject);
 			Node p = bindings.isBNode("p") ? NodeFactory.createBlankNode(predicate) : NodeFactory.createURI(predicate);
@@ -290,6 +245,11 @@ public class UpdateProcessorTuned extends UpdateProcessor  {
 			added_removed[0]= added;
 			added_removed[1]= removed;
 			return added_removed;
+		}
+		
+		private Response ApplyAddedRemovedFilter(BindingsResults added,BindingsResults removed,MetricsTuningFile metrics,Response ret) throws SEPASecurityException, SEPABindingsException {			
+
+			return new UpdateResponseARM(ret.toString(),added,removed,metrics) ;
 		}
 		private Response ApplyAddedRemovedFilter(BindingsResults added,BindingsResults removed,Response ret) throws SEPASecurityException, SEPABindingsException {
 					

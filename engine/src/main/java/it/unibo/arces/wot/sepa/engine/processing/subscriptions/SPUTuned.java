@@ -32,8 +32,8 @@ import it.unibo.arces.wot.sepa.commons.response.UpdateResponse;
 import it.unibo.arces.wot.sepa.commons.sparql.ARBindingsResults;
 import it.unibo.arces.wot.sepa.commons.sparql.Bindings;
 import it.unibo.arces.wot.sepa.commons.sparql.BindingsResults;
-import it.unibo.arces.wot.sepa.engine.processing.tuning.TuningFile;
-import it.unibo.arces.wot.sepa.engine.processing.tuning.UpdateResponseTuningFile;
+import it.unibo.arces.wot.sepa.engine.processing.tuning.MetricsTuningFile;
+import it.unibo.arces.wot.sepa.engine.processing.tuning.UpdateResponseARM;
 import it.unibo.arces.wot.sepa.engine.processing.tuning.UpdateResponseWithAR;
 import it.unibo.arces.wot.sepa.engine.scheduling.InternalSubscribeRequest;
 import it.unibo.arces.wot.sepa.engine.scheduling.InternalUpdateRequest;
@@ -51,7 +51,8 @@ import org.apache.logging.log4j.LogManager;
  */
 class SPUTuned extends SPU {
 	private final Logger logger;
-
+	private MetricsTuningFile metrics;
+	
 	public SPUTuned(InternalSubscribeRequest subscribe, SPUManager manager) throws SEPAProtocolException {
 		super(subscribe, manager);
 
@@ -103,11 +104,52 @@ class SPUTuned extends SPU {
 		if (ret.isError()) {
 			throw new SEPAProcessingException(ret.toString());
 		}
+	
+		
+		ARBindingsResults ris=null;
+		
+		//eseguo tutti e due i tipi di ricerca per le added e le removed
+		metrics=((UpdateResponseARM)res).getMetricTuningFile();
+		
 
-		System.out.println("IS UpdateResponseWithAR: " + (res instanceof UpdateResponseWithAR));//ok 
 		long start = System.nanoTime();		
+		ris =execTuned((UpdateResponseARM)res,ret);
+		long end = System.nanoTime();		
+		metrics.setTimeSPUTuned(end-start);
+		if(ris!=null) {
+			metrics.setTunedAdded(ris.getAddedBindings().toJson().toString());
+			metrics.setTunedRemoved(ris.getRemovedBindings().toJson().toString());
+		}
+	
 		
+		start = System.nanoTime();	
+		ris =execNormal(res,ret);
+		if(ris!=null) {
+			metrics.setAdded(ris.getAddedBindings().toJson().toString());
+			metrics.setRemoved(ris.getRemovedBindings().toJson().toString());
+		}
+		end = System.nanoTime();
+		metrics.setTimeSPUNormal(end-start);
+
 		
+		/*
+		if(res instanceof UpdateResponseARM && tuned_on) {//TUNED
+			ris =execTuned((UpdateResponseARM)res,ret);	
+		}else {//NOT TUNED
+			 ris =execNormal(res,ret);	
+		}
+		*/
+		 
+		if(ris!=null) {
+			metrics.write();
+			return new Notification(getSPUID(),ris);
+		}
+		return null;
+		
+	}
+	
+	private ARBindingsResults execNormal(UpdateResponse res,Response ret) {
+
 		// Current and previous bindings
 		BindingsResults results = ((QueryResponse) ret).getBindingsResults();
 		BindingsResults currentBindings = new BindingsResults(results);
@@ -116,100 +158,106 @@ class SPUTuned extends SPU {
 		BindingsResults added = new BindingsResults(results.getVariables(), null);
 		BindingsResults removed = new BindingsResults(results.getVariables(), null);
 		
-		
-		if(res instanceof UpdateResponseWithAR && tuned_on) {//TUNED
-			BindingsResults solutionForRemoved = ((UpdateResponseWithAR)res).getRemoved();
-			BindingsResults solutionForAdded = ((UpdateResponseWithAR)res).getAdded();
-			
-			//check ADDED from UpdateResponseWithAR	
-		
-			for (Bindings solution : lastBindings.getBindings()) {
-				if (solutionForRemoved.contains(solution) && !solution.isEmpty()){
-					removed.add(solution);
-					solutionForRemoved.remove(solution);
-				}
-			}
-			
-			long stop = System.nanoTime();
-			logger.trace("Removed bindings: " + removed + " found in " + (stop - start) + " ns");
-			
-			//check REMOVED from UpdateResponseWithAR
-			
-			for (Bindings solution : solutionForAdded.getBindings()) {
-				if (!lastBindings.contains(solution) && !solution.isEmpty()) {
-					try {
-						added.add(convertBindings(solution,results.getVariables()));
-					} catch (SEPABindingsException e) {
-						System.out.println("WIP-------- ERROR on convertBindings:  "+e.getMessage());
-						// TODO Auto-generated catch block
-						e.printStackTrace();
-					}
-				}
-					//added.add(solution);
-			}	
-			
-			stop = System.nanoTime();
-			logger.trace("Added bindings: " + added + " found in " + (stop - start) + " ns");
-			
-			
-			System.out.println("Tuned added: "+added.toJson().toString());
-			System.out.println("Tuned removed: "+removed.toJson().toString());
-			if (!solutionForAdded.isEmpty() || !solutionForRemoved.isEmpty())
-				return new Notification(getSPUID(), new ARBindingsResults(added, removed));
+		// Create empty bindings if null
+		if (lastBindings == null)
+			lastBindings = new BindingsResults(null, null);
 
-		}else {//NOT TUNED
-
+		logger.trace("Current bindings: " + currentBindings);
+		logger.trace("Last bindings: " + lastBindings);
 		
 
-			// Create empty bindings if null
-			if (lastBindings == null)
-				lastBindings = new BindingsResults(null, null);
-
-			logger.trace("Current bindings: " + currentBindings);
-			logger.trace("Last bindings: " + lastBindings);
-			
-			
-			//lastBindings è tipo una cache locale delle triple che il cliente ha?
-			for (Bindings solution : lastBindings.getBindings()) {
-				if (!results.contains(solution) && !solution.isEmpty())
-					removed.add(solution);
-				else
-					results.remove(solution);
-			}
-			long stop = System.nanoTime();
-			logger.trace("Removed bindings: " + removed + " found in " + (stop - start) + " ns");
-
-			// Find added bindings
-			start = System.nanoTime();
-			for (Bindings solution : results.getBindings()) {
-				if (!lastBindings.contains(solution) && !solution.isEmpty())
-					added.add(solution);
-			}		
-			stop = System.nanoTime();
-			logger.trace("Added bindings: " + added + " found in " + (stop - start) + " ns");
-			// Update the last bindings with the current ones
-			lastBindings = currentBindings;
-			System.out.println("Not tuned added: "+added.toJson().toString());
-			System.out.println("Not tuned removed: "+removed.toJson().toString());
-			// Send notification (or end processing indication)
-			
-			if (!added.isEmpty() || !removed.isEmpty()) {
-				if(res instanceof UpdateResponseTuningFile ) {
-					TuningFile temp = ((UpdateResponseTuningFile)res).getTuningFile();
-					temp.setRealAdded(added.size());
-					temp.setRealRemoved(removed.size());
-					temp.write();
-				}
-				return new Notification(getSPUID(), new ARBindingsResults(added, removed));
-			}
-
+		long start = System.nanoTime();
+		//lastBindings è tipo una cache locale delle triple che il cliente ha?
+		for (Bindings solution : lastBindings.getBindings()) {
+			if (!results.contains(solution) && !solution.isEmpty())
+				removed.add(solution);
+			else
+				results.remove(solution);
 		}
-		
+		long stop = System.nanoTime();
+		logger.trace("Removed bindings: " + removed + " found in " + (stop - start) + " ns");
 
-		return null;
+		// Find added bindings
+		start = System.nanoTime();
+		for (Bindings solution : results.getBindings()) {
+			if (!lastBindings.contains(solution) && !solution.isEmpty())
+				added.add(solution);
+		}		
+		stop = System.nanoTime();
+		logger.trace("Added bindings: " + added + " found in " + (stop - start) + " ns");
+		// Update the last bindings with the current ones
+		lastBindings = currentBindings;
+		System.out.println("Not tuned added: "+added.toJson().toString());
+		System.out.println("Not tuned removed: "+removed.toJson().toString());
+		// Send notification (or end processing indication)
+		
+		if (!added.isEmpty() || !removed.isEmpty()) {
+			return  new ARBindingsResults(added, removed);
+		}else {
+			return null;
+		}
 	}
 	
+	private ARBindingsResults execTuned(UpdateResponseARM res,Response ret ) {
+		
+		
+
+		// Current and previous bindings
+		BindingsResults results = ((QueryResponse) ret).getBindingsResults();
+		BindingsResults currentBindings = new BindingsResults(results);
+
+		// Initialize the results with the current bindings
+		BindingsResults added = new BindingsResults(results.getVariables(), null);
+		BindingsResults removed = new BindingsResults(results.getVariables(), null);
+		
+		// Create empty bindings if null
+		if (lastBindings == null)
+			lastBindings = new BindingsResults(null, null);
+		
+		BindingsResults solutionForRemoved = ((UpdateResponseWithAR)res).getRemoved();
+		BindingsResults solutionForAdded = ((UpdateResponseWithAR)res).getAdded();
+
+		long start = System.nanoTime();
+		//check ADDED from UpdateResponseWithAR	
 	
+		for (Bindings solution : lastBindings.getBindings()) {
+			if (solutionForRemoved.contains(solution) && !solution.isEmpty()){
+				removed.add(solution);
+				solutionForRemoved.remove(solution);
+			}
+		}
+		
+		long stop = System.nanoTime();
+		logger.trace("Removed bindings: " + removed + " found in " + (stop - start) + " ns");
+		
+		start = System.nanoTime();
+		//check REMOVED from UpdateResponseWithAR		
+		for (Bindings solution : solutionForAdded.getBindings()) {
+			if (!lastBindings.contains(solution) && !solution.isEmpty()) {
+				try {
+					added.add(convertBindings(solution,results.getVariables()));
+				} catch (SEPABindingsException e) {
+					System.out.println("WIP-------- ERROR on convertBindings:  "+e.getMessage());
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
+				//added.add(solution);
+		}	
+		
+		stop = System.nanoTime();
+		logger.trace("Added bindings: " + added + " found in " + (stop - start) + " ns");
+		
+		
+		System.out.println("Tuned added: "+added.toJson().toString());
+		System.out.println("Tuned removed: "+removed.toJson().toString());
+		if (!solutionForAdded.isEmpty() || !solutionForRemoved.isEmpty()) {
+			return new ARBindingsResults(added, removed);
+		}else {
+			return null;
+		}
+		
+	}
 	private Bindings convertBindings(Bindings original,ArrayList<String> variables) throws SEPABindingsException {
 		Bindings ris =new Bindings();
 		if(variables.get(0)!=null ) {
